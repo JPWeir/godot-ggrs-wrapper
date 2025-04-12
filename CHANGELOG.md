@@ -4,24 +4,31 @@ In this document, all remarkable changes are listed. Not mentioned are smaller c
 
 ## Unreleased
 
+## 0.6.0
+- Updated GGRS to v0.11.0
+- Migrated from GDNative to GDExtension
+- Removed `create_new_session()` functions, added `set_max_prediction_window()`
+  - To reflect GGRS now using a `SessionBuilder` pattern, all session setters should be called before calling `create_new_session()`
+- `get_events()` now returns a Dictionary for each event, as Godot does not seem to support Rust tuples
+
 ## 0.5.0
 
 - Updated GGRS to v0.8.0
 - Updated Rust edition to 2021
-- Deprecated `create_session()` method in `GodotGGRSP2PSession`, `GodotGGRSP2PSpectatorSession` and `GodotGGRSSyncTestSession`. Use `create_new_session()` from now on.
+- Deprecated `create_session()` method in `GodotGgrsP2PSession`, `GodotGGRSP2PSpectatorSession` and `GodotGGRSSyncTestSession`. Use `create_new_session()` from now on.
 
 ## 0.4.1
 
 - Updated GGRS to v0.5.1
-- Added `get_frames_ahead()` function to `GodotGGRSP2PSession`.
+- Added `get_frames_ahead()` function to `GodotGgrsP2PSession`.
 - Added an example project made by [@trian-gles](https://github.com/trian-gles).
 
 ## 0.4.0
 
 - Rename struct `GodotGGRSSyncTest` to `GodotGGRSSyncTestSession`.
-- Added `get_current_state()` function to `GodotGGRSP2PSession` which returns the current state as a String.
+- Added `get_current_state()` function to `GodotGgrsP2PSession` which returns the current state as a String.
 - Added `get_current_state()` function to `GodotGGRSP2PSpectatorSession` which returns the current state as a String.
-- Added `get_network_stats(handle)` function to `GodotGGRSP2PSession` which returns the network stats of the handle as a tuple.
+- Added `get_network_stats(handle)` function to `GodotGgrsP2PSession` which returns the network stats of the handle as a tuple.
 - Added `get_network_stats()` function to `GodotGGRSP2PSpectatorSession` which returns the network stats as a tuple.
 - Rename function `receive_callback_node` to `set_callback_node` in all Session structs.
 
@@ -32,7 +39,7 @@ In this document, all remarkable changes are listed. Not mentioned are smaller c
 ## 0.3.0
 
 - Added `get_events()` function to `GodotGGRSP2PSpectatorSession` which calls `events()` on the GGRS Session
-- Added `get_events()` function to `GodotGGRSP2PSession` which calls `events()` on the GGRS Session
+- Added `get_events()` function to `GodotGgrsP2PSession` which calls `events()` on the GGRS Session
 
 ## 0.2.0
 

@@ -1,78 +1,66 @@
+use std::mem;
+
 use crate::*;
-use ggrs::{PlayerHandle, SyncTestSession};
+use ggrs::{PlayerHandle, SessionBuilder, SyncTestSession};
 
 /// A Godot implementation of [`SyncTestSession`]
-#[derive(NativeClass)]
-#[inherit(Node)]
-pub struct GodotGGRSSyncTestSession {
-    sess: Option<SyncTestSession>,
-    callback_node: Option<Ref<Node>>,
+#[derive(GodotClass)]
+#[class(base=Node)]
+pub struct GodotGgrsSyncTestSession {
+    base: Base<Node>,
+    session_builder: SessionBuilder<GgrsConfig>,
+    sess: Option<SyncTestSession<GgrsConfig>>,
+    callback_node: Option<Gd<Node>>
 }
 
-impl GodotGGRSSyncTestSession {
-    fn new(_owner: &Node) -> Self {
-        GodotGGRSSyncTestSession {
+#[godot_api]
+impl INode for GodotGgrsSyncTestSession {
+    fn init(base: Base<Node>) -> Self {
+        GodotGgrsSyncTestSession {
+            base,
+            session_builder: SessionBuilder::new(),
             sess: None,
-            callback_node: None,
+            callback_node: None
         }
     }
 }
 
-#[methods]
-impl GodotGGRSSyncTestSession {
+#[godot_api]
+impl GodotGgrsSyncTestSession {
     //EXPORTED FUNCTIONS
-    #[export]
-    fn _ready(&self, _owner: &Node) {
-        godot_print!("GodotGGRSSyncTest _ready() called.");
+    #[func]
+    fn _ready(&self) {
+        godot_print!("GodotGgrsP2PSession _ready() called.");
     }
 
-    /// Creates a [SyncTestSession],
-    /// call this when you want to start setting up a `SyncTestSession` takes the total number of players, the check distance and the max prediction frames as parameters
+    /// Set the check distance, measured in frames.
+    /// Cannot be set after calling start_session.
+    #[func]
+    pub fn set_check_distance(&mut self, check_distance: u8) {
+        let builder = mem::take(&mut self.session_builder);
+        self.session_builder = builder.with_check_distance(check_distance as usize);
+    }
+
+    /// Set the maximum prediction window, measured in frames.
+    /// Cannot be set after calling start_session.
     /// # Notes
     /// - Max prediction frames is the maximum number of frames GGRS will roll back. Every gamestate older than this is guaranteed to be correct if the players did not desync.
     /// - This value used to default to `8 frames`, but this has been made adjustable with `GGRS 0.7.0`
-    #[export]
-    pub fn create_new_session(
-        &mut self,
-        _owner: &Node,
-        num_players: u32,
-        check_distance: usize,
-        max_pred: usize,
-    ) {
-        let input_size: usize = std::mem::size_of::<u32>();
-        match SyncTestSession::new(num_players, input_size, max_pred, check_distance) {
-            Ok(s) => self.sess = Some(s),
-            Err(e) => godot_error!("{}", e),
-        }
+    #[func]
+    pub fn set_max_prediction_window(&mut self, window: u8) {
+        let builder = mem::take(&mut self.session_builder);
+        self.session_builder = builder.with_max_prediction_window(window as usize);
     }
 
-    /// Deprecated method to create a [SyncTestSession]. Use [Self::create_new_session()] instead.
-    #[deprecated(since = "0.5.0", note = "please use `create_new_session()` instead")]
-    #[export]
-    pub fn create_session(&mut self, _owner: &Node, num_players: u32, check_distance: usize) {
-        self.create_new_session(_owner, num_players, check_distance, 8)
-    }
-
-    /// Sets [SyncTestSession::set_frame_delay()] of specified handle.
+    /// Sets [SessionBuilder::with_input_delay()]
     /// # Errors
     /// - Will print a [ERR_MESSAGE_NO_SESSION_MADE] error if a session has not been made
-    #[export]
-    pub fn set_frame_delay(
-        &mut self,
-        _owner: &Node,
-        frame_delay: u32,
-        player_handle: PlayerHandle,
-    ) {
-        match &mut self.sess {
-            Some(s) => match s.set_frame_delay(frame_delay, player_handle) {
-                Ok(_) => return,
-                Err(e) => godot_error!("{}", e),
-            },
-            None => godot_error!("{}", ERR_MESSAGE_NO_SESSION_MADE),
-        }
+    #[func]
+    pub fn set_input_delay(&mut self, delay: u32) {
+        self.session_builder = mem::take(&mut self.session_builder).with_input_delay(delay as usize);
     }
 
-    /// This function will advance the frame using an array of all the inputs given as a parameter (inputs are currently an int in Godot).
+    /// This function will advance the frame using the inputs given as a parameter (currently an int in Godot)
     /// Before using this function you have to set the callback node and make sure it has the following callback functions implemented
     /// - [CALLBACK_FUNC_SAVE_GAME_STATE]
     /// - [CALLBACK_FUNC_LOAD_GAME_STATE]
@@ -80,21 +68,24 @@ impl GodotGGRSSyncTestSession {
     /// # Errors
     /// - Will print a [ERR_MESSAGE_NO_SESSION_MADE] error if a session has not been made
     /// - Will print a [ERR_MESSAGE_NO_CALLBACK_NODE] error if a callback node has not been set
-    #[export]
-    pub fn advance_frame(&mut self, _owner: &Node, all_inputs: Vec<u32>) {
-        let mut all_inputs_bytes = Vec::new();
-        for i in all_inputs {
-            all_inputs_bytes.push(Vec::from(i.to_be_bytes()));
-        }
-
-        match self.callback_node {
+    #[func]
+    pub fn advance_frame(&mut self, local_player_handle: u8, local_input: u8) {
+        match &mut self.callback_node {
             Some(callback_node) => match &mut self.sess {
-                Some(s) => match s.advance_frame(&all_inputs_bytes) {
-                    Ok(requests) => {
-                        ggrs_request_handlers::handle_requests(&callback_node, requests);
+                Some(s) => {
+                    match s.add_local_input(local_player_handle as PlayerHandle, local_input as <GgrsConfig as Config>::Input) {
+                        Err(e) => {
+                            godot_error!("{}", e);
+                        },
+                        _ => ()
                     }
-                    Err(e) => {
-                        godot_error!("{}", e);
+                    match s.advance_frame() {
+                        Ok(requests) => {
+                            ggrs_request_handlers::handle_requests(callback_node, requests);
+                        }
+                        Err(e) => {
+                            godot_error!("{}", e);
+                        }
                     }
                 },
                 None => {
@@ -111,10 +102,10 @@ impl GodotGGRSSyncTestSession {
     /// Will return a 0 if no session was made.
     /// # Errors
     /// - Will print an [ERR_MESSAGE_NO_SESSION_MADE] error if a session has not been made
-    #[export]
-    pub fn get_max_prediction(&mut self, _owner: &Node) -> usize {
+    #[func]
+    pub fn get_max_prediction(&mut self) -> u8 {
         match &mut self.sess {
-            Some(s) => s.max_prediction(),
+            Some(s) => s.max_prediction() as u8,
             None => {
                 godot_error!("{}", ERR_MESSAGE_NO_SESSION_MADE);
                 return 0;
@@ -123,8 +114,8 @@ impl GodotGGRSSyncTestSession {
     }
 
     /// Sets the callback node that will be called when using [Self::advance_frame()]
-    #[export]
-    pub fn set_callback_node(&mut self, _owner: &Node, callback: Ref<Node>) {
+    #[func]
+    pub fn set_callback_node(&mut self, callback: Gd<Node>) {
         self.callback_node = Some(callback);
     }
 }

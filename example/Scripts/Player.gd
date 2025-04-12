@@ -1,6 +1,6 @@
 extends Node2D
 
-export var speed: int = 10
+@export var speed: int = 10
 
 func _ready():
 	$Name.text = name
