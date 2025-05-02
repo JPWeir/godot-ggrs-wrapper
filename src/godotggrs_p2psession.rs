@@ -119,8 +119,8 @@ impl GodotGgrsP2PSession {
 
     /// Returns true if connection has been established with remote players and is ready to start taking inputs via [Self::advance_frame()]
     #[func]
-    pub fn is_running(&mut self) -> bool {
-        match &mut self.sess {
+    pub fn is_running(&self) -> bool {
+        match &self.sess {
             Some(s) => s.current_state() == SessionState::Running,
             None => false,
         }
@@ -141,7 +141,27 @@ impl GodotGgrsP2PSession {
         }
     }
 
-    /// This function will advance the frame using the inputs given as a parameter (currently an int in Godot)
+    /// This function will register a player handle's integer-encoded inputs for a subsequent call to advance_frame
+    /// # Errors
+    /// - Will print a [ERR_MESSAGE_NO_SESSION_MADE] error if a session has not been made
+    #[func]
+    pub fn add_local_input(&mut self, local_player_handle: u8, local_input: u8) {
+        match &mut self.sess {
+            Some(s) => {
+                match s.add_local_input(local_player_handle as PlayerHandle, local_input as <GgrsConfig as Config>::Input) {
+                    Err(e) => {
+                        godot_error!("{}", e);
+                    },
+                    _ => ()
+                }
+            },
+            None => {
+                godot_error!("{}", ERR_MESSAGE_NO_SESSION_MADE);
+            }
+        }
+    }
+
+    /// This function will advance the frame
     /// Before using this function you have to set the callback node and make sure it has the following callback functions implemented
     /// - [CALLBACK_FUNC_SAVE_GAME_STATE]
     /// - [CALLBACK_FUNC_LOAD_GAME_STATE]
@@ -150,16 +170,10 @@ impl GodotGgrsP2PSession {
     /// - Will print a [ERR_MESSAGE_NO_SESSION_MADE] error if a session has not been made
     /// - Will print a [ERR_MESSAGE_NO_CALLBACK_NODE] error if a callback node has not been set
     #[func]
-    pub fn advance_frame(&mut self, local_player_handle: u8, local_input: u8) {
+    pub fn advance_frame(&mut self) {
         match &mut self.callback_node {
             Some(callback_node) => match &mut self.sess {
                 Some(s) => {
-                    match s.add_local_input(local_player_handle as PlayerHandle, local_input as <GgrsConfig as Config>::Input) {
-                        Err(e) => {
-                            godot_error!("{}", e);
-                        },
-                        _ => ()
-                    }
                     match s.advance_frame() {
                         Ok(requests) => {
                             ggrs_request_handlers::handle_requests(callback_node, requests);

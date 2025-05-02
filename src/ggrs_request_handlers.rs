@@ -1,4 +1,5 @@
 use crate::*;
+use arrayref::array_ref;
 use ggrs::{Config, Frame, GameStateCell, GgrsRequest, InputStatus};
 
 pub fn handle_requests(callback_node: &mut Gd<Node> , requests: Vec<GgrsRequest<GgrsConfig>>) {
@@ -26,30 +27,24 @@ pub fn ggrs_request_advance_fame(node: &mut Gd<Node>, inputs: Vec<(<GgrsConfig a
     node.call(CALLBACK_FUNC_ADVANCE_FRAME, &[godot_array.to_variant()]);
 }
 
-/// computes the fletcher16 checksum, copied from wikipedia: <https://en.wikipedia.org/wiki/Fletcher%27s_checksum>
-fn fletcher16(data: &PackedByteArray) -> u16 {
-    let mut sum1: u16 = 0;
-    let mut sum2: u16 = 0;
-
-    for index in 0..data.len() {
-        sum1 = (sum1 + data[index] as u16) % 255;
-        sum2 = (sum2 + sum1) % 255;
-    }
-
-    (sum2 << 8) | sum1
+fn checksum(packed: &PackedByteArray) -> u128 {
+    let blake_hash = blake3::hash(&packed.as_slice());
+    // Take the first 16 bytes of the hash, use big endian as our networking standard
+    u128::from_be_bytes(*array_ref!(blake_hash.as_bytes(), 0, 16))
 }
 
+// TODO: Does the Godot layer really need frame or checksum?
 pub fn ggrs_request_load_game_state(node: &mut Gd<Node>, cell: GameStateCell<PackedByteArray>, frame: Frame) {
     //Unpack the cell and have over it's values to godot so it can handle it.
     let state_data = cell.load().unwrap_or_default();
-    let checksum = fletcher16(&state_data);
-    node.call(CALLBACK_FUNC_LOAD_GAME_STATE, &[frame.to_variant(), state_data.to_variant(), checksum.to_variant()]);
+    node.call(CALLBACK_FUNC_LOAD_GAME_STATE, &[state_data.to_variant()]);
 }
 
 pub fn ggrs_request_save_game_state(node: &mut Gd<Node>, cell: GameStateCell<PackedByteArray>, frame: Frame) {
     //Store current cell for later use
-    let state_variant: Variant = node.call(CALLBACK_FUNC_SAVE_GAME_STATE, &[frame.to_variant()]);
+    let state_variant = node.call(CALLBACK_FUNC_SAVE_GAME_STATE, &[frame.to_variant()]);
     let state_data = PackedByteArray::from_variant(&state_variant);
-    let checksum = fletcher16(&state_data);
+    
+    let checksum: u128 = checksum(&state_data);
     cell.save(frame, Some(state_data), Some(checksum.into()));
 }

@@ -1,7 +1,7 @@
 use std::mem;
 
 use crate::*;
-use ggrs::{PlayerHandle, SessionBuilder, SyncTestSession};
+use ggrs::{PlayerHandle, PlayerType, SessionBuilder, SyncTestSession};
 
 /// A Godot implementation of [`SyncTestSession`]
 #[derive(GodotClass)]
@@ -10,7 +10,8 @@ pub struct GodotGgrsSyncTestSession {
     base: Base<Node>,
     session_builder: SessionBuilder<GgrsConfig>,
     sess: Option<SyncTestSession<GgrsConfig>>,
-    callback_node: Option<Gd<Node>>
+    callback_node: Option<Gd<Node>>,
+    players: Vec<(PlayerType<<GgrsConfig as Config>::Address>, PlayerHandle)>
 }
 
 #[godot_api]
@@ -20,7 +21,8 @@ impl INode for GodotGgrsSyncTestSession {
             base,
             session_builder: SessionBuilder::new(),
             sess: None,
-            callback_node: None
+            callback_node: None,
+            players: Vec::new()
         }
     }
 }
@@ -31,6 +33,13 @@ impl GodotGgrsSyncTestSession {
     #[func]
     fn _ready(&self) {
         godot_print!("GodotGgrsP2PSession _ready() called.");
+    }
+
+    /// Adds a local player to the session builder and return the handle.
+    /// Cannot add players after calling start_session.
+    #[func]
+    pub fn add_local_player(&mut self) -> u8 {
+        self.add_player(PlayerType::Local) as u8
     }
 
     /// Set the check distance, measured in frames.
@@ -60,7 +69,27 @@ impl GodotGgrsSyncTestSession {
         self.session_builder = mem::take(&mut self.session_builder).with_input_delay(delay as usize);
     }
 
-    /// This function will advance the frame using the inputs given as a parameter (currently an int in Godot)
+    /// This function will register a player handle's integer-encoded inputs for a subsequent call to advance_frame
+    /// # Errors
+    /// - Will print a [ERR_MESSAGE_NO_SESSION_MADE] error if a session has not been made
+    #[func]
+    pub fn add_local_input(&mut self, local_player_handle: u8, local_input: u8) {
+        match &mut self.sess {
+            Some(s) => {
+                match s.add_local_input(local_player_handle as PlayerHandle, local_input as <GgrsConfig as Config>::Input) {
+                    Err(e) => {
+                        godot_error!("{}", e);
+                    },
+                    _ => ()
+                }
+            },
+            None => {
+                godot_error!("{}", ERR_MESSAGE_NO_SESSION_MADE);
+            }
+        }
+    }
+
+    /// This function will advance the frame
     /// Before using this function you have to set the callback node and make sure it has the following callback functions implemented
     /// - [CALLBACK_FUNC_SAVE_GAME_STATE]
     /// - [CALLBACK_FUNC_LOAD_GAME_STATE]
@@ -69,16 +98,10 @@ impl GodotGgrsSyncTestSession {
     /// - Will print a [ERR_MESSAGE_NO_SESSION_MADE] error if a session has not been made
     /// - Will print a [ERR_MESSAGE_NO_CALLBACK_NODE] error if a callback node has not been set
     #[func]
-    pub fn advance_frame(&mut self, local_player_handle: u8, local_input: u8) {
+    pub fn advance_frame(&mut self) {
         match &mut self.callback_node {
             Some(callback_node) => match &mut self.sess {
                 Some(s) => {
-                    match s.add_local_input(local_player_handle as PlayerHandle, local_input as <GgrsConfig as Config>::Input) {
-                        Err(e) => {
-                            godot_error!("{}", e);
-                        },
-                        _ => ()
-                    }
                     match s.advance_frame() {
                         Ok(requests) => {
                             ggrs_request_handlers::handle_requests(callback_node, requests);
@@ -117,5 +140,42 @@ impl GodotGgrsSyncTestSession {
     #[func]
     pub fn set_callback_node(&mut self, callback: Gd<Node>) {
         self.callback_node = Some(callback);
+    }
+
+    /// Sets the player count and players from [Self::players]. Called internally when starting a session.
+    /// # Errors
+    /// - Will print a [GgrsError](ggrs::error::GgrsError) error if a player cannot be added.
+    fn set_players(&mut self) {
+        self.session_builder = mem::take(&mut self.session_builder).with_num_players(self.players.len());
+        for (player_type, player_handle) in self.players.iter() {
+            match mem::take(&mut self.session_builder).add_player(*player_type, *player_handle) {
+                Ok(new_builder) => self.session_builder = new_builder,
+                Err(e) => {
+                    godot_error!("{}", e);
+                }
+            }
+        }
+    }
+
+    /// Sets the callback node that will be called when using [Self::advance_frame()]
+    #[func]
+    pub fn start_session(&mut self) {
+        self.set_players();
+        match mem::take(&mut self.session_builder).start_synctest_session() {
+            Ok(s) => self.sess = Some(s),
+            Err(e) => godot_error!("{}", e)
+        }
+    }
+
+    #[func]
+    pub fn is_running(&self) -> bool {
+        self.sess.is_some()
+    }
+
+    //NON-EXPORTED FUNCTIONS
+    fn add_player(&mut self, player_type: PlayerType<<GgrsConfig as Config>::Address>) -> PlayerHandle {
+        let handle = self.players.len();
+        self.players.push((player_type, handle));
+        handle
     }
 }
